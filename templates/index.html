@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smile Detector</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>😊 Smile Detector</h1>
+      <p class="subtitle">Upload a photo — we'll detect facial keypoints and tell you if you're smiling.</p>
+    </header>
+
+    <!-- Upload area -->
+    <section class="upload-section">
+      <label class="drop-zone" id="dropZone" for="photoInput">
+        <span class="drop-icon">📷</span>
+        <span class="drop-text">Click or drag &amp; drop a photo here</span>
+        <span class="drop-hint">JPG · PNG · WEBP · BMP — max 10 MB</span>
+        <input type="file" id="photoInput" accept="image/*" hidden />
+      </label>
+
+      <div class="preview-wrap" id="previewWrap" hidden>
+        <canvas id="previewCanvas"></canvas>
+      </div>
+
+      <button id="detectBtn" class="btn-detect" disabled>Detect Smile</button>
+    </section>
+
+    <!-- Result -->
+    <section class="result-section" id="resultSection" hidden>
+      <div class="result-badge" id="resultBadge"></div>
+      <div class="warning-box" id="warningBox" hidden></div>
+
+      <!-- Feedback -->
+      <div class="feedback-bar">
+        <span class="feedback-label">Was this correct?</span>
+        <button class="btn-feedback btn-yes" id="feedbackYes" title="Yes, correct">👍 Yes</button>
+        <button class="btn-feedback btn-no"  id="feedbackNo"  title="No, it was wrong">👎 No</button>
+        <span class="feedback-status" id="feedbackStatus"></span>
+      </div>
+
+      <div class="result-details">
+        <div class="detail-card">
+          <h3>Confidence</h3>
+          <div class="confidence-bar-wrap">
+            <div class="confidence-bar" id="confidenceBar"></div>
+          </div>
+          <span id="confidenceText"></span>
+        </div>
+        <div class="detail-card">
+          <h3>Face Size</h3>
+          <p class="face-size-label">Inter-eye distance</p>
+          <p id="interEyeText" class="face-size-value"></p>
+          <p id="faceSizeHint" class="face-size-hint"></p>
+        </div>
+        <div class="detail-card">
+          <h3>Facial Features</h3>
+          <table id="featuresTable"></table>
+        </div>
+        <div class="detail-card">
+          <h3>Keypoints (15)</h3>
+          <div class="kp-scroll">
+            <table id="keypointsTable"></table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Retrain panel -->
+    <section class="retrain-section">
+      <div class="retrain-card">
+        <div class="retrain-info">
+          <span class="retrain-title">Model Training</span>
+          <span class="retrain-sub">Feedback samples collected: <strong id="feedbackCount">0</strong></span>
+        </div>
+        <button class="btn-retrain" id="retrainBtn">🔄 Retrain Model</button>
+      </div>
+      <div class="retrain-result" id="retrainResult" hidden></div>
+    </section>
+
+    <!-- Error -->
+    <div class="error-box" id="errorBox" hidden></div>
+  </div>
+
+  <script src="/static/js/main.js"></script>
+</body>
+</html>
