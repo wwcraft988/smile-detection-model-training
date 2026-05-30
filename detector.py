@@ -55,7 +55,7 @@ _base_opts = mp_base.BaseOptions(model_asset_path=_MODEL_PATH)
 _face_opts = mp_vision.FaceLandmarkerOptions(
     base_options=_base_opts,
     running_mode=mp_vision.RunningMode.IMAGE,
-    num_faces=1,
+    num_faces=10,
     min_face_detection_confidence=0.5,
     min_face_presence_confidence=0.5,
     min_tracking_confidence=0.5,
@@ -357,28 +357,11 @@ def _classify_mediapipe_kps(kps: list) -> tuple:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
-def extract_keypoints_from_image(image_bytes: bytes) -> dict:
+def _extract_keypoints_for_face(lm, w: int, h: int) -> dict:
     """
-    Run MediaPipe FaceLandmarker on raw image bytes.
-    Returns dict with keypoints list, inter_eye_px, and error.
+    Extract keypoints and compute inter-eye distance for a single face landmark set.
+    Returns dict with keypoints list, inter_eye_px, and error (or None).
     """
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img_bgr is None:
-        return {"keypoints": None, "inter_eye_px": 0.0,
-                "error": "Could not decode image."}
-
-    h, w = img_bgr.shape[:2]
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
-    result   = _LANDMARKER.detect(mp_image)
-
-    if not result.face_landmarks:
-        return {"keypoints": None, "inter_eye_px": 0.0,
-                "error": "No face detected in the image."}
-
-    lm = result.face_landmarks[0]
     keypoints = []
     for idx in _ALL_SLOTS:
         keypoints.append([round(lm[idx].x * w, 2),
@@ -404,28 +387,12 @@ def extract_keypoints_from_image(image_bytes: bytes) -> dict:
             "error": None}
 
 
-def detect_smile(image_bytes: bytes) -> dict:
+def _build_face_result(kps: list) -> dict:
     """
-    Full pipeline: extract keypoints -> classify -> return result dict.
+    Classify a single face's keypoints and return a result dict.
     """
-    extraction = extract_keypoints_from_image(image_bytes)
-
-    if extraction["error"]:
-        return {
-            "smile": None,
-            "confidence": 0.0,
-            "low_confidence": False,
-            "inter_eye_px": extraction["inter_eye_px"],
-            "keypoints": {},
-            "features": {},
-            "error": extraction["error"],
-            "warning": None,
-        }
-
-    kps = extraction["keypoints"]
     is_smile, confidence = _classify_mediapipe_kps(kps)
 
-    # Human-readable features for the UI
     pts = np.array(kps, dtype=float)
     eye_span = abs(pts[0, 0] - pts[5, 0])
     mouth_w  = abs(pts[8, 0] - pts[9, 0])
@@ -452,9 +419,58 @@ def detect_smile(image_bytes: bytes) -> dict:
         "smile": bool(is_smile),
         "confidence": round(confidence, 4),
         "low_confidence": low_confidence,
-        "inter_eye_px": extraction["inter_eye_px"],
         "keypoints": named_kps,
         "features": features,
         "error": None,
         "warning": warning,
+    }
+
+
+def detect_smile(image_bytes: bytes) -> dict:
+    """
+    Full pipeline: extract keypoints for ALL detected faces -> classify each.
+    Returns a dict with a 'faces' list (one entry per detected face) and
+    top-level 'error' if the image itself could not be processed.
+    """
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img_bgr is None:
+        return {"faces": [], "face_count": 0,
+                "error": "Could not decode image."}
+
+    h, w = img_bgr.shape[:2]
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+    result   = _LANDMARKER.detect(mp_image)
+
+    if not result.face_landmarks:
+        return {"faces": [], "face_count": 0,
+                "error": "No face detected in the image."}
+
+    faces = []
+    for face_idx, lm in enumerate(result.face_landmarks):
+        extraction = _extract_keypoints_for_face(lm, w, h)
+        if extraction["error"]:
+            faces.append({
+                "face_index": face_idx,
+                "smile": None,
+                "confidence": 0.0,
+                "low_confidence": False,
+                "inter_eye_px": extraction["inter_eye_px"],
+                "keypoints": {},
+                "features": {},
+                "error": extraction["error"],
+                "warning": None,
+            })
+        else:
+            face_result = _build_face_result(extraction["keypoints"])
+            face_result["face_index"]   = face_idx
+            face_result["inter_eye_px"] = extraction["inter_eye_px"]
+            faces.append(face_result)
+
+    return {
+        "faces": faces,
+        "face_count": len(faces),
+        "error": None,
     }

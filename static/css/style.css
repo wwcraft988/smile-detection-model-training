@@ -81,32 +81,95 @@ header h1 { font-size: 2.2rem; font-weight: 700; letter-spacing: -0.5px; }
 /* ── Result section ───────────────────────────────────────────────────────── */
 .result-section { display: flex; flex-direction: column; gap: 1.5rem; }
 
-.result-badge {
+/* Face count badge */
+.face-count-badge {
   text-align: center;
-  font-size: 3rem;
-  font-weight: 800;
-  padding: 1.5rem;
-  border-radius: 16px;
-  letter-spacing: 1px;
+  font-size: .9rem;
+  font-weight: 600;
+  color: #94a3b8;
+  background: #1e2535;
+  border: 1px solid #334155;
+  border-radius: 99px;
+  padding: .4rem 1.2rem;
+  align-self: center;
 }
-.result-badge.smile    { background: #14532d; color: #4ade80; }
-.result-badge.no-smile { background: #450a0a; color: #f87171; }
 
-.result-details {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+/* Faces grid — stacks vertically, one card per face */
+.faces-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Individual face card */
+.face-card {
+  background: #1a2030;
+  border: 2px solid var(--face-color, #334155);
+  border-radius: 16px;
+  padding: 1.2rem 1.4rem;
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
 }
 
-.detail-card {
+.face-card-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.face-card-title {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+
+.face-card-error {
+  color: #f87171;
+  font-size: .88rem;
+  background: #450a0a;
+  border-radius: 8px;
+  padding: .6rem .9rem;
+}
+
+/* Per-face smile badge */
+.face-badge {
+  text-align: center;
+  font-size: 1.6rem;
+  font-weight: 800;
+  padding: .9rem 1rem;
+  border-radius: 12px;
+  letter-spacing: .5px;
+}
+.face-badge.smile    { background: #14532d; color: #4ade80; }
+.face-badge.no-smile { background: #450a0a; color: #f87171; }
+
+/* Per-face warning */
+.face-warning {
+  background: #451a03;
+  border: 1px solid #92400e;
+  color: #fcd34d;
+  border-radius: 10px;
+  padding: .7rem 1rem;
+  font-size: .85rem;
+}
+
+/* Per-face details grid */
+.face-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.face-detail-card {
   background: #1e2535;
   border: 1px solid #334155;
   border-radius: 12px;
   padding: 1rem 1.2rem;
 }
-.detail-card h3 { font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; margin-bottom: .75rem; }
+.face-detail-card h3 { font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; margin-bottom: .75rem; }
 
-/* Confidence bar */
+/* ── Shared: confidence bar & tables (used inside face cards) ─────────────── */
 .confidence-bar-wrap {
   background: #0f1117;
   border-radius: 99px;
@@ -117,18 +180,13 @@ header h1 { font-size: 2.2rem; font-weight: 700; letter-spacing: -0.5px; }
 .confidence-bar {
   height: 100%;
   border-radius: 99px;
-  background: linear-gradient(90deg, #6366f1, #a78bfa);
   transition: width .5s ease;
 }
-#confidenceText { font-size: .9rem; color: #cbd5e1; }
 
-/* Tables */
 table { width: 100%; border-collapse: collapse; font-size: .82rem; }
 td, th { padding: .3rem .4rem; border-bottom: 1px solid #1e2535; }
 td:first-child { color: #94a3b8; }
 td:last-child  { text-align: right; font-variant-numeric: tabular-nums; }
-
-.kp-scroll { max-height: 220px; overflow-y: auto; }
 
 /* ── Feedback bar ─────────────────────────────────────────────────────────── */
 .feedback-bar {

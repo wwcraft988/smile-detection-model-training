@@ -44,12 +44,13 @@ def detect():
 @app.route("/feedback", methods=["POST"])
 def feedback():
     """
-    Save a user correction.
+    Save a user correction for a specific face.
 
     JSON body:
         {
-            "keypoints": [[x,y], ...],   // 15 pairs from the last /detect response
-            "correct_label": true|false  // what the correct answer actually is
+            "keypoints": [[x,y], ...],   // 15 pairs from the face's keypoints
+            "correct_label": true|false, // what the correct answer actually is
+            "face_index": 0              // which face (optional, default 0)
         }
     """
     body = request.get_json(silent=True)
