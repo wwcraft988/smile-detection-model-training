@@ -1,41 +1,7 @@
 """
-detector.py
------------
-Smile detection using MediaPipe FaceLandmarker (Tasks API v0.10+).
-
-Approach
---------
-The training data (facial_keypoints.json) stores 15 keypoints in a custom
-face-relative coordinate space split into two groups:
-  kp0-9  : eye region  (y < ~25 in the ~64-px space)
-  kp10-14: mouth region (y > ~30)
-
-The classifier is trained on RATIO-BASED features that are invariant to
-scale, translation, and coordinate-system orientation:
-
-  Feature 1: mouth_w / eye_span_x        (smile widens the mouth)
-  Feature 2: mouth_h / mouth_w           (mouth openness)
-  Feature 3: mouth_w / face_w            (mouth width relative to face)
-  Feature 4: eye_to_mouth_y / face_h     (smile lifts cheeks, shrinks lower face)
-  Feature 5: mouth_top_y / face_h        (mouth position in face)
-  Feature 6: lower_face_h / face_h       (lower face proportion)
-  Feature 7: mouth_h / eye_to_mouth_y    (mouth height relative to eye-mouth gap)
-  Feature 8: mouth_ctr_y_rel_eye / face_h
-
-These same ratios are computed from MediaPipe landmarks using the
-equivalent anatomical points:
-
-  eye_span_x  = |lm[33].x  - lm[263].x|   outer eye corners
-  eye_top_y   = min(lm[159].y, lm[386].y)  top of eyes
-  eye_bot_y   = max(lm[145].y, lm[374].y)  bottom of eyes
-  eye_ctr_y   = mean of all 8 eye landmark y values
-  mouth_w     = |lm[61].x  - lm[291].x|    mouth corners
-  mouth_top_y = min(lm[13].y, lm[78].y, lm[308].y)
-  mouth_bot_y = lm[17].y                   lower lip bottom
-  mouth_h     = mouth_bot_y - mouth_top_y
-  mouth_ctr_y = mean of all 7 mouth landmark y values
-  face_h      = mouth_bot_y - eye_top_y
-  face_w      = |lm[33].x  - lm[263].x|  (same as eye_span for this dataset)
+Smile detection using MediaPipe FaceLandmarker + a Logistic Regression
+classifier trained on 8 scale-invariant ratio features (mouth width,
+openness, eye-to-mouth distance, etc.). Supports multiple faces per image.
 """
 
 import json
@@ -62,7 +28,6 @@ _face_opts = mp_vision.FaceLandmarkerOptions(
 )
 _LANDMARKER = mp_vision.FaceLandmarker.create_from_options(_face_opts)
 
-# MediaPipe landmark indices we extract
 _EYE_SLOTS = [
     33,   # left  eye outer corner
     133,  # left  eye inner corner
@@ -91,21 +56,15 @@ KP_NAMES = [
     "mouth_top_left",  "mouth_top_right", "lower_lip",
 ]
 
-# Minimum inter-eye distance in pixels for reliable landmark detection
 _MIN_INTER_EYE_PX = 30
-# Minimum classifier confidence to return a definitive answer
 _MIN_CONFIDENCE = 0.60
 
 
-# ── Training data ─────────────────────────────────────────────────────────────
 def _load_training_data(path: str = "data/facial_keypoints.json") -> list:
     with open(path, "r") as f:
         raw = json.load(f)
     samples = []
     for entry in raw["train"]:
-        # entry[0]      → id string
-        # entry[1..15]  → [x, y] keypoints (15 total)
-        # entry[16]     → {"smile": bool}
         kps   = [entry[i] for i in range(1, 16)]
         label = entry[16]["smile"]
         samples.append({"keypoints": kps, "smile": label})
@@ -115,12 +74,8 @@ def _load_training_data(path: str = "data/facial_keypoints.json") -> list:
 _TRAINING_DATA = _load_training_data()
 
 
-# ── Feature extraction ────────────────────────────────────────────────────────
 def _extract_features_from_training_kps(kps: list) -> np.ndarray:
-    """
-    Extract 8 ratio-based features from training-data keypoints.
-    kp0-9  = eye region, kp10-14 = mouth region.
-    """
+    """Extract 8 ratio-based features from training-data keypoints (kp0-9 = eyes, kp10-14 = mouth)."""
     pts = np.array(kps, dtype=float)
     eye_pts   = pts[:10]
     mouth_pts = pts[10:]
@@ -137,53 +92,36 @@ def _extract_features_from_training_kps(kps: list) -> np.ndarray:
     mouth_ctr_y = mouth_pts[:, 1].mean()
 
     face_w      = pts[:, 0].max() - pts[:, 0].min()
-    face_h      = mouth_bot_y - eye_top_y          # eye-top to mouth-bottom
+    face_h      = mouth_bot_y - eye_top_y
 
     eye_to_mouth = mouth_ctr_y - eye_ctr_y
 
     return np.array([
-        mouth_w     / (eye_span_x    + 1e-6),   # f1: mouth width / eye span
-        mouth_h     / (mouth_w       + 1e-6),   # f2: mouth openness
-        mouth_w     / (face_w        + 1e-6),   # f3: mouth width / face width
-        eye_to_mouth / (face_h       + 1e-6),   # f4: eye-to-mouth / face height
-        mouth_top_y  / (face_h       + 1e-6),   # f5: mouth top position
-        (mouth_bot_y - eye_bot_y) / (face_h + 1e-6),  # f6: lower face proportion
-        mouth_h     / (eye_to_mouth  + 1e-6),   # f7: mouth height / eye-to-mouth
-        (mouth_ctr_y - eye_bot_y) / (face_h + 1e-6),  # f8: mouth center rel eye bottom
+        mouth_w      / (eye_span_x    + 1e-6),
+        mouth_h      / (mouth_w       + 1e-6),
+        mouth_w      / (face_w        + 1e-6),
+        eye_to_mouth / (face_h        + 1e-6),
+        mouth_top_y  / (face_h        + 1e-6),
+        (mouth_bot_y - eye_bot_y) / (face_h + 1e-6),
+        mouth_h      / (eye_to_mouth  + 1e-6),
+        (mouth_ctr_y - eye_bot_y) / (face_h + 1e-6),
     ])
 
 
 def _extract_features_from_mediapipe_kps(kps: list) -> np.ndarray:
-    """
-    Extract the same 8 ratio-based features from MediaPipe keypoints.
-    kps[0-7]  = eye landmarks (_EYE_SLOTS order)
-    kps[8-14] = mouth landmarks (_MOUTH_SLOTS order)
-
-    Mapping to training-data equivalents:
-      eye_span_x  = |kps[0].x - kps[5].x|   (outer eye corners: lm33, lm263)
-      eye_top_y   = min(kps[2].y, kps[6].y)  (eye tops: lm159, lm386)
-      eye_bot_y   = max(kps[3].y, kps[7].y)  (eye bottoms: lm145, lm374)
-      eye_ctr_y   = mean of kps[0-7] y
-      mouth_w     = |kps[8].x - kps[9].x|    (mouth corners: lm61, lm291)
-      mouth_top_y = min(kps[10].y, kps[12].y, kps[13].y)  (lm13, lm78, lm308)
-      mouth_bot_y = kps[14].y                (lower lip: lm17)
-      mouth_h     = mouth_bot_y - mouth_top_y
-      mouth_ctr_y = mean of kps[8-14] y
-      face_w      = eye_span_x  (same as training)
-      face_h      = mouth_bot_y - eye_top_y
-    """
+    """Extract the same 8 ratio-based features from MediaPipe keypoints (kps[0-7] = eyes, kps[8-14] = mouth)."""
     pts = np.array(kps, dtype=float)
     eye_pts   = pts[:8]
     mouth_pts = pts[8:]
 
-    eye_span_x  = abs(pts[0, 0] - pts[5, 0])    # lm33 to lm263
-    eye_top_y   = min(pts[2, 1], pts[6, 1])      # lm159, lm386
-    eye_bot_y   = max(pts[3, 1], pts[7, 1])      # lm145, lm374
+    eye_span_x  = abs(pts[0, 0] - pts[5, 0])
+    eye_top_y   = min(pts[2, 1], pts[6, 1])
+    eye_bot_y   = max(pts[3, 1], pts[7, 1])
     eye_ctr_y   = eye_pts[:, 1].mean()
 
-    mouth_w     = abs(pts[8, 0] - pts[9, 0])     # lm61 to lm291
-    mouth_top_y = min(pts[10, 1], pts[12, 1], pts[13, 1])  # lm13, lm78, lm308
-    mouth_bot_y = pts[14, 1]                      # lm17
+    mouth_w     = abs(pts[8, 0] - pts[9, 0])
+    mouth_top_y = min(pts[10, 1], pts[12, 1], pts[13, 1])
+    mouth_bot_y = pts[14, 1]
     mouth_h     = mouth_bot_y - mouth_top_y
     mouth_ctr_y = mouth_pts[:, 1].mean()
 
@@ -204,15 +142,12 @@ def _extract_features_from_mediapipe_kps(kps: list) -> np.ndarray:
     ])
 
 
-# ── Classifier ────────────────────────────────────────────────────────────────
 def _build_classifier():
     X = np.array([_extract_features_from_training_kps(s["keypoints"])
                   for s in _TRAINING_DATA])
     y = np.array([int(s["smile"]) for s in _TRAINING_DATA])
-
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-
     clf = LogisticRegression(max_iter=1000, C=1.0, solver="lbfgs")
     clf.fit(X_scaled, y)
     return clf, scaler
@@ -220,7 +155,6 @@ def _build_classifier():
 
 _CLASSIFIER, _SCALER = _build_classifier()
 
-# ── Feedback store ────────────────────────────────────────────────────────────
 _FEEDBACK_PATH = os.path.join(os.path.dirname(__file__), "data", "feedback.json")
 
 
@@ -239,18 +173,7 @@ def _save_feedback(entries: list) -> None:
 
 
 def add_feedback(keypoints: list, correct_label: bool) -> dict:
-    """
-    Save a user-corrected label for a set of MediaPipe keypoints.
-
-    Parameters
-    ----------
-    keypoints     : 15 [x, y] pairs from extract_keypoints_from_image()
-    correct_label : True = smile, False = no smile
-
-    Returns
-    -------
-    dict with feedback_count and message
-    """
+    """Save a user-corrected label for a set of MediaPipe keypoints."""
     entries = _load_feedback()
     entries.append({
         "keypoints": keypoints,
@@ -265,18 +188,8 @@ def add_feedback(keypoints: list, correct_label: bool) -> dict:
 
 def retrain(min_feedback: int = 1) -> dict:
     """
-    Retrain the classifier using original training data + all feedback.
-
-    The feedback samples are weighted more heavily (×5) so even a small
-    number of corrections can shift the decision boundary.
-
-    Parameters
-    ----------
-    min_feedback : minimum feedback samples required to retrain
-
-    Returns
-    -------
-    dict with accuracy stats and sample counts
+    Retrain the classifier on original data + feedback.
+    Feedback samples are weighted ×5 to give corrections real impact.
     """
     global _CLASSIFIER, _SCALER
 
@@ -289,17 +202,14 @@ def retrain(min_feedback: int = 1) -> dict:
             "feedback_count": len(feedback),
         }
 
-    # ── Build feature matrix from original training data ──────────────────
     X_orig = np.array([_extract_features_from_training_kps(s["keypoints"])
                        for s in _TRAINING_DATA])
     y_orig = np.array([int(s["smile"]) for s in _TRAINING_DATA])
 
-    # ── Build feature matrix from feedback (MediaPipe keypoints) ─────────
     X_fb = np.array([_extract_features_from_mediapipe_kps(e["keypoints"])
                      for e in feedback])
     y_fb = np.array([int(e["smile"]) for e in feedback])
 
-    # Weight feedback samples ×5 so corrections have real impact
     feedback_weight = 5
     sample_weight = np.concatenate([
         np.ones(len(X_orig)),
@@ -309,22 +219,15 @@ def retrain(min_feedback: int = 1) -> dict:
     X_all = np.vstack([X_orig, X_fb])
     y_all = np.concatenate([y_orig, y_fb])
 
-    # ── Fit new scaler + classifier ───────────────────────────────────────
     new_scaler = StandardScaler()
     X_scaled   = new_scaler.fit_transform(X_all)
 
     new_clf = LogisticRegression(max_iter=1000, C=1.0, solver="lbfgs")
     new_clf.fit(X_scaled, y_all, sample_weight=sample_weight)
 
-    # ── Evaluate on original training set (unweighted) ───────────────────
-    X_orig_scaled = new_scaler.transform(X_orig)
-    orig_acc = new_clf.score(X_orig_scaled, y_orig)
+    orig_acc = new_clf.score(new_scaler.transform(X_orig), y_orig)
+    fb_acc   = new_clf.score(new_scaler.transform(X_fb),   y_fb)
 
-    # ── Evaluate on feedback set ──────────────────────────────────────────
-    X_fb_scaled = new_scaler.transform(X_fb)
-    fb_acc = new_clf.score(X_fb_scaled, y_fb)
-
-    # ── Swap in the new model ─────────────────────────────────────────────
     _CLASSIFIER = new_clf
     _SCALER     = new_scaler
 
@@ -340,15 +243,11 @@ def retrain(min_feedback: int = 1) -> dict:
 
 
 def get_feedback_count() -> int:
-    """Return the number of saved feedback samples."""
     return len(_load_feedback())
 
 
 def _classify_mediapipe_kps(kps: list) -> tuple:
-    """
-    Classify MediaPipe keypoints using the trained classifier.
-    Returns (is_smile: bool, confidence: float 0-1).
-    """
+    """Returns (is_smile: bool, confidence: float)."""
     vec = _extract_features_from_mediapipe_kps(kps).reshape(1, -1)
     vec_scaled = _SCALER.transform(vec)
     pred  = _CLASSIFIER.predict(vec_scaled)[0]
@@ -356,18 +255,13 @@ def _classify_mediapipe_kps(kps: list) -> tuple:
     return bool(pred), float(proba[pred])
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
 def _extract_keypoints_for_face(lm, w: int, h: int) -> dict:
-    """
-    Extract keypoints and compute inter-eye distance for a single face landmark set.
-    Returns dict with keypoints list, inter_eye_px, and error (or None).
-    """
+    """Extract keypoints and inter-eye distance for one face landmark set."""
     keypoints = []
     for idx in _ALL_SLOTS:
         keypoints.append([round(lm[idx].x * w, 2),
                           round(lm[idx].y * h, 2)])
 
-    # Inter-eye distance: lm[33] (index 0) to lm[263] (index 5)
     inter_eye_px = float(np.linalg.norm(
         np.array(keypoints[5]) - np.array(keypoints[0])
     ))
@@ -388,9 +282,7 @@ def _extract_keypoints_for_face(lm, w: int, h: int) -> dict:
 
 
 def _build_face_result(kps: list) -> dict:
-    """
-    Classify a single face's keypoints and return a result dict.
-    """
+    """Classify a single face's keypoints and return a result dict."""
     is_smile, confidence = _classify_mediapipe_kps(kps)
 
     pts = np.array(kps, dtype=float)
@@ -427,11 +319,7 @@ def _build_face_result(kps: list) -> dict:
 
 
 def detect_smile(image_bytes: bytes) -> dict:
-    """
-    Full pipeline: extract keypoints for ALL detected faces -> classify each.
-    Returns a dict with a 'faces' list (one entry per detected face) and
-    top-level 'error' if the image itself could not be processed.
-    """
+    """Run the full pipeline on image bytes. Returns a faces list, one entry per detected face."""
     nparr = np.frombuffer(image_bytes, np.uint8)
     img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img_bgr is None:

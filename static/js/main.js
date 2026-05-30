@@ -1,4 +1,3 @@
-/* ── DOM refs ─────────────────────────────────────────────────────────────── */
 const dropZone      = document.getElementById('dropZone');
 const photoInput    = document.getElementById('photoInput');
 const previewWrap   = document.getElementById('previewWrap');
@@ -13,12 +12,10 @@ const feedbackCount = document.getElementById('feedbackCount');
 const retrainBtn    = document.getElementById('retrainBtn');
 const retrainResult = document.getElementById('retrainResult');
 
-/* ── State ────────────────────────────────────────────────────────────────── */
 let selectedFile  = null;
 let originalImage = null;
-let lastFaces     = [];   // array of face result objects from /detect
+let lastFaces     = [];
 
-/* ── Keypoint draw order ──────────────────────────────────────────────────── */
 const KP_ORDER = [
   'left_eye_outer','left_eye_inner','left_eye_top','left_eye_bottom',
   'right_eye_inner','right_eye_outer','right_eye_top','right_eye_bottom',
@@ -34,7 +31,6 @@ const FACE_COLORS = [
   { dot: '#f43f5e', mouth: '#34d399' },
 ];
 
-/* ── Init: load feedback count ───────────────────────────────────────────── */
 (async () => {
   try {
     const res  = await fetch('/stats');
@@ -43,7 +39,6 @@ const FACE_COLORS = [
   } catch (_) {}
 })();
 
-/* ── Drag & drop ──────────────────────────────────────────────────────────── */
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 dropZone.addEventListener('drop', e => {
@@ -56,7 +51,6 @@ photoInput.addEventListener('change', () => {
   if (photoInput.files[0]) handleFile(photoInput.files[0]);
 });
 
-/* ── File handling ────────────────────────────────────────────────────────── */
 function handleFile(file) {
   selectedFile = file;
   hideError();
@@ -76,7 +70,6 @@ function handleFile(file) {
   reader.readAsDataURL(file);
 }
 
-/* ── Draw preview with keypoints for all faces ────────────────────────────── */
 function drawPreview(img, faces) {
   const MAX_W = previewWrap.clientWidth || 700;
   const scale = Math.min(1, MAX_W / img.naturalWidth);
@@ -97,7 +90,6 @@ function drawPreview(img, faces) {
     if (!face.keypoints || Object.keys(face.keypoints).length === 0) return;
     const palette = FACE_COLORS[i % FACE_COLORS.length];
 
-    // Draw eye dots
     ctx.fillStyle   = palette.dot;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth   = 1;
@@ -110,7 +102,6 @@ function drawPreview(img, faces) {
       ctx.stroke();
     }
 
-    // Draw mouth dots
     ctx.fillStyle = palette.mouth;
     for (const name of mouthNames) {
       const pt = face.keypoints[name];
@@ -121,7 +112,6 @@ function drawPreview(img, faces) {
       ctx.stroke();
     }
 
-    // Connect mouth corners with a curve
     const ml = face.keypoints['mouth_left'];
     const mr = face.keypoints['mouth_right'];
     const mt = face.keypoints['mouth_top_ctr'];
@@ -134,11 +124,10 @@ function drawPreview(img, faces) {
       ctx.stroke();
     }
 
-    // Face index label near the left eye outer corner
     const anchor = face.keypoints['left_eye_outer'];
     if (anchor) {
-      ctx.font      = 'bold 13px Segoe UI, sans-serif';
-      ctx.fillStyle = palette.dot;
+      ctx.font        = 'bold 13px Segoe UI, sans-serif';
+      ctx.fillStyle   = palette.dot;
       ctx.strokeStyle = '#000';
       ctx.lineWidth   = 3;
       const label = `Face ${i + 1}`;
@@ -148,7 +137,6 @@ function drawPreview(img, faces) {
   });
 }
 
-/* ── Detect button ────────────────────────────────────────────────────────── */
 detectBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
 
@@ -175,33 +163,26 @@ detectBtn.addEventListener('click', async () => {
   }
 });
 
-/* ── Render all face results ──────────────────────────────────────────────── */
 function renderResults(data) {
-  // Update face count badge
   faceCountBadge.textContent = `${data.face_count} face${data.face_count !== 1 ? 's' : ''} detected`;
   faceCountBadge.hidden = false;
 
-  // Draw all keypoints on canvas
   if (originalImage) drawPreview(originalImage, data.faces);
 
-  // Build per-face cards
   facesGrid.innerHTML = '';
   data.faces.forEach((face, i) => {
-    const palette = FACE_COLORS[i % FACE_COLORS.length];
-    facesGrid.appendChild(buildFaceCard(face, i, palette));
+    facesGrid.appendChild(buildFaceCard(face, i, FACE_COLORS[i % FACE_COLORS.length]));
   });
 
   resultSection.hidden = false;
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/* ── Build a single face result card ─────────────────────────────────────── */
 function buildFaceCard(face, i, palette) {
   const card = document.createElement('div');
   card.className = 'face-card';
   card.style.setProperty('--face-color', palette.dot);
 
-  // ── Header ──
   const header = document.createElement('div');
   header.className = 'face-card-header';
 
@@ -209,7 +190,6 @@ function buildFaceCard(face, i, palette) {
   title.className = 'face-card-title';
   title.textContent = `Face ${i + 1}`;
   title.style.color = palette.dot;
-
   header.appendChild(title);
 
   if (face.error) {
@@ -221,29 +201,23 @@ function buildFaceCard(face, i, palette) {
     return card;
   }
 
-  // ── Badge ──
   const badge = document.createElement('div');
   badge.className = `face-badge ${face.smile ? 'smile' : 'no-smile'}`;
   badge.textContent = face.smile ? '😄 SMILING' : '😐 NOT SMILING';
 
-  // ── Warning ──
+  card.appendChild(header);
+  card.appendChild(badge);
+
   if (face.warning) {
     const warn = document.createElement('div');
     warn.className = 'face-warning';
     warn.textContent = '⚠️ ' + face.warning;
-    card.appendChild(header);
-    card.appendChild(badge);
     card.appendChild(warn);
-  } else {
-    card.appendChild(header);
-    card.appendChild(badge);
   }
 
-  // ── Details grid ──
   const details = document.createElement('div');
   details.className = 'face-details';
 
-  // Confidence
   const pct = Math.round(face.confidence * 100);
   const confCard = document.createElement('div');
   confCard.className = 'face-detail-card';
@@ -259,7 +233,6 @@ function buildFaceCard(face, i, palette) {
     <span>${pct}%</span>
   `;
 
-  // Face size
   const px = face.inter_eye_px;
   const sizeColor = px < 50 ? '#f87171' : px < 80 ? '#fcd34d' : '#4ade80';
   const sizeHint  = px < 50 ? '⚠ Too small' : px < 80 ? 'Acceptable — closer is better' : '✓ Good face size';
@@ -272,7 +245,6 @@ function buildFaceCard(face, i, palette) {
     <p class="face-size-hint">${sizeHint}</p>
   `;
 
-  // Features
   const featureLabels = {
     mouth_w_eye_span_ratio:  'Mouth width / eye span',
     mouth_openness:          'Mouth openness',
@@ -292,19 +264,18 @@ function buildFaceCard(face, i, palette) {
   details.appendChild(featCard);
   card.appendChild(details);
 
-  // ── Feedback ──
-  const fbBar = document.createElement('div');
+  const fbBar    = document.createElement('div');
   fbBar.className = 'feedback-bar';
 
-  const fbLabel = document.createElement('span');
+  const fbLabel  = document.createElement('span');
   fbLabel.className = 'feedback-label';
   fbLabel.textContent = 'Was this correct?';
 
-  const btnYes = document.createElement('button');
+  const btnYes   = document.createElement('button');
   btnYes.className = 'btn-feedback btn-yes';
   btnYes.textContent = '👍 Yes';
 
-  const btnNo = document.createElement('button');
+  const btnNo    = document.createElement('button');
   btnNo.className = 'btn-feedback btn-no';
   btnNo.textContent = '👎 No';
 
@@ -323,7 +294,6 @@ function buildFaceCard(face, i, palette) {
   return card;
 }
 
-/* ── Feedback ─────────────────────────────────────────────────────────────── */
 async function sendFeedback(face, userSaysCorrect, btnYes, btnNo, fbStatus) {
   if (!face.keypoints) return;
 
@@ -341,23 +311,17 @@ async function sendFeedback(face, userSaysCorrect, btnYes, btnNo, fbStatus) {
       body:    JSON.stringify({ keypoints: kpList, correct_label: correctLabel }),
     });
     const data = await res.json();
-
-    if (data.error) {
-      fbStatus.textContent = '⚠ ' + data.error;
-    } else {
-      fbStatus.textContent = '✓ Saved';
-      feedbackCount.textContent = data.feedback_count;
-    }
+    fbStatus.textContent = data.error ? '⚠ ' + data.error : '✓ Saved';
+    if (!data.error) feedbackCount.textContent = data.feedback_count;
   } catch (err) {
     fbStatus.textContent = '⚠ Network error';
   }
 }
 
-/* ── Retrain ──────────────────────────────────────────────────────────────── */
 retrainBtn.addEventListener('click', async () => {
-  retrainBtn.disabled    = true;
-  retrainBtn.textContent = 'Retraining…';
-  retrainResult.hidden   = true;
+  retrainBtn.disabled     = true;
+  retrainBtn.textContent  = 'Retraining…';
+  retrainResult.hidden    = true;
   retrainResult.className = 'retrain-result';
 
   try {
@@ -388,17 +352,15 @@ retrainBtn.addEventListener('click', async () => {
   }
 });
 
-/* ── Helpers ──────────────────────────────────────────────────────────────── */
 function showError(msg) {
   errorBox.textContent = '⚠️  ' + msg;
   errorBox.hidden = false;
 }
 function hideError()  { errorBox.hidden = true; }
 function hideResult() {
-  resultSection.hidden = true;
+  resultSection.hidden  = true;
   faceCountBadge.hidden = true;
 }
-
 function showSpinner() {
   const el = document.createElement('div');
   el.className = 'spinner-overlay';
